@@ -103,4 +103,24 @@ class EmbeddingRepo():
             .execute()
         ).data
 
+    @staticmethod
+    def deleteMentorEmbedding(discord_id: str):
+        return (
+            supabase
+            .table("Mentor Embeddings")
+            .delete()
+            .eq("mentor_id", discord_id)
+            .execute()
+        )
+
+    @staticmethod
+    def deleteMenteeEmbedding(discord_id: str):
+        return (
+            supabase
+            .table("Mentee Embeddings")
+            .delete()
+            .eq("mentee_id", discord_id)
+            .execute()
+        )
+
     

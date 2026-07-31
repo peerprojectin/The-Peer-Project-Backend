@@ -4,6 +4,9 @@ from App.repository.MentorRepo import MentorRepo
 from postgrest.exceptions import APIError
 from App.auth.dependencies import get_current_admin
 
+from App.AI.embeddings.service import EmbeddingService
+from App.AI.embeddings.repository import EmbeddingRepo
+
 router = APIRouter(
     prefix="/mentor",
     tags=["Mentor"]
@@ -17,6 +20,17 @@ async def register_mentor(
     try:
         result = MentorRepo.createData(
             mentor.model_dump(mode="json")
+        )
+
+        mentor_data = result.data[0]
+
+        embedding = EmbeddingService.mentor_embedding(
+            MentorRegistration(**mentor_data)
+        )
+
+        EmbeddingRepo.createMentorEmbedding(
+            mentor_data["discord_id"],
+            embedding
         )
 
         return {
@@ -71,6 +85,35 @@ async def get_mentor_id(discord_id: str, current_admin = Depends(get_current_adm
 @router.put("/{discord_id}")
 async def update_mentor_one_field(discord_id: str, data, field:str, current_admin = Depends(get_current_admin)):
     result = MentorRepo.updateDataField(discord_id, data, field)
+
+    EMBEDDING_FIELDS ={
+        "full_name",
+        "currentStatus",
+        "college",
+        "email",
+        "proof",
+        "reddit_id",
+        "discord_id",
+        "display_name",
+        "why_mentor",
+        "additionalInfo",
+        "track",
+        "Availability",
+    }
+
+    if field in EMBEDDING_FIELDS:
+        mentor = MentorRepo.getDataByID(discord_id)[0]
+
+        
+        embedding = EmbeddingService.mentor_embedding(
+            MentorRegistration(**mentor)
+        )
+
+        EmbeddingRepo.updateMentorEmbedding(
+            discord_id,
+            embedding
+        )
+
     return{
         "success": True,
         "mentor": result.data
@@ -95,6 +138,11 @@ async def verify_mentor(
 
 @router.delete("/{discord_id}/delete")
 async def delete_mentor_id(discord_id: str, current_admin = Depends(get_current_admin)):
+
+    EmbeddingRepo.deleteMentorEmbedding(
+        discord_id
+    )
+
     result = MentorRepo.deleteData(discord_id)
     return{
         "success": True,
