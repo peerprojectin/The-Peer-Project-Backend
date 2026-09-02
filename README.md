@@ -17,7 +17,7 @@ The Architecture choosen is the hub-spoke for easy upgradability.
 ## Features
 - JWT Authentication
 - PostgreSQL Database with Supabase
-- AI-powered Mentor-Mentee Assignment(will be available in V2)
+- AI-powered Mentor-Mentee Assignment
 - GraphQL Integration(Will be available in V2)
 - Embeddings using pgvector in supabase.
 - Mentor/Mentee Registration
@@ -37,6 +37,7 @@ Database
 Authentication
 - JWT
 - bcrypt
+- HttpOnly cookies for secure token storage (protected routes no longer expose tokens to client-side scripts)
 
 AI/LLM Services
 - HuggingFace
@@ -96,7 +97,7 @@ hence to access it go to https://localhost:8000/docs
 - [x] Admin Authentication
 - [x] AI Embeddings
 - [x] Semantic Search
-- [ ] Mentor Assignment Engine
+- [x] Mentor Assignment Engine
 - [ ] GraphQL API
 - [ ] Discord Bot Integration
 - [ ] Docker Deployment
