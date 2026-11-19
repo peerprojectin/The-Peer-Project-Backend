@@ -48,6 +48,8 @@ AI/LLM Services
 Deployment
 - Docker (multi-stage image, GPU-enabled via NVIDIA Container Toolkit)
 - Docker Compose
+- Kubernetes (Kustomize manifests in `k8s/`)
+- GitHub Actions CI/CD, images published to GHCR
 
 ## Installation
 ```bash
@@ -71,6 +73,8 @@ The-Peer-Project-Backend/
     ├── config.py
     ├── main.py
     └── test.py
+├── .github/workflows/   (ci.yml, cd.yml)
+├── k8s/                 (Kubernetes manifests)
 ├── .dockerignore
 ├── .gitignore
 ├── database.py
@@ -107,6 +111,37 @@ The API listens on `127.0.0.1:8000`. The admin auth cookie is `Secure`, so in
 production put an HTTPS reverse proxy (Caddy, Nginx, or your host's load
 balancer) in front of it.
 
+## CI/CD
+GitHub Actions, in `.github/workflows/`:
+
+| Workflow | Runs on | What it does |
+|---|---|---|
+| `ci.yml` | every PR and push | ruff lint, byte-compile, validate k8s + compose files, test-build the Docker image |
+| `cd.yml` | push to `v3` (or manual run) | runs CI, then builds and pushes the image to `ghcr.io/shyzen15/the-peer-project-backend` (tags `sha-<commit>`, `v3`, `latest`), then deploys it to Kubernetes pinned by digest, rolling back if the new pod doesn't become healthy |
+
+To turn on the deploy step:
+1. Repo **Settings → Environments**: create `production` and add secret `KUBE_CONFIG` (a kubeconfig that can deploy to the `peerproject` namespace). Optionally add required reviewers for a manual approval gate.
+2. Repo **Settings → Variables**: set `K8S_DEPLOY_ENABLED` to `true`.
+
+Until then CD still builds and publishes the image and skips the deploy.
+
+## Kubernetes
+Cluster requirements:
+- A GPU node with the NVIDIA device plugin (or NVIDIA GPU Operator)
+- An ingress controller (set `ingressClassName` in `k8s/ingress.yaml`)
+- cert-manager with a `letsencrypt-prod` ClusterIssuer (HTTPS is required for the secure admin cookie)
+
+First deploy:
+```bash
+kubectl create namespace peerproject
+kubectl -n peerproject create secret generic peerproject-backend-env --from-env-file=App/.env
+kubectl apply -k k8s/
+kubectl -n peerproject rollout status deployment/peerproject-backend --timeout=20m
+```
+
+Edit the host in `k8s/ingress.yaml` to your real API domain before applying.
+If the image pull fails with an auth error, make the GHCR package public or add an `imagePullSecret`.
+
 ## API Documentation
 FastAPI uses Swagger UI in its docs for testing API endpoints
 hence to access it go to https://localhost:8000/docs
@@ -125,7 +160,8 @@ hence to access it go to https://localhost:8000/docs
 - [ ] GraphQL API
 - [ ] Discord Bot Integration
 - [x] Docker Deployment
-- [ ] CI/CD Pipeline
+- [x] CI/CD Pipeline
+- [x] Kubernetes Deployment
 
 ## Author
 Developed by Shiven Sharma(ShyZen15) Co-Founder @ ThePeerProject

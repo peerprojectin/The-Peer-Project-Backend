@@ -1,0 +1,32 @@
+# Public HTTPS entry point. TLS is required: the admin cookie is `secure=True`.
+#
+# Before applying, set:
+#   - spec.ingressClassName to your cluster's ingress controller
+#     (e.g. traefik, or your cloud provider's class)
+#   - the host to your real API domain
+#   - the cert-manager issuer name to one that exists in your cluster
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: peerproject-backend
+  labels:
+    app.kubernetes.io/name: peerproject-backend
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - api.peerproject.in
+      secretName: peerproject-backend-tls
+  rules:
+    - host: api.peerproject.in
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: peerproject-backend
+                port:
+                  name: http

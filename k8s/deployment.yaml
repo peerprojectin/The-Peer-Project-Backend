@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: peerproject-backend
+  labels:
+    app.kubernetes.io/name: peerproject-backend
+spec:
+  # One GPU pod. Both models live in GPU memory, so each extra replica
+  # needs its own GPU; scale this only when you have the GPUs for it.
+  replicas: 1
+  revisionHistoryLimit: 5
+  # Recreate = stop the old pod, then start the new one. A RollingUpdate
+  # would need a second GPU and would fight over the ReadWriteOnce model
+  # cache volume. Trade-off: a short downtime window on each deploy.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: peerproject-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: peerproject-backend
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000      # the `app` user created in the Dockerfile
+        runAsGroup: 1000
+        fsGroup: 1000        # makes the model-cache volume writable by `app`
+      # GPU node pools are commonly tainted so only GPU workloads land there.
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: api
+          # Placeholder name; kustomization.yaml rewrites it to the GHCR image
+          # and the CD pipeline pins it to the exact digest it just built.
+          image: peerproject-backend
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          # SUPABASE_*, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES, HF_TOKEN
+          envFrom:
+            - secretRef:
+                name: peerproject-backend-env
+          resources:
+            requests:
+              cpu: "1"
+              memory: 8Gi
+            limits:
+              memory: 16Gi
+              nvidia.com/gpu: 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /home/app/.cache/huggingface
+          # Startup: models load at import time (and download on first boot),
+          # so allow up to 15 min (90 x 10s) before Kubernetes gives up.
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            failureThreshold: 90
+          # Readiness: only route traffic to the pod when it answers.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          # Liveness: restart the container if it stops answering.
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: hf-cache
+          persistentVolumeClaim:
+            claimName: peerproject-hf-cache
