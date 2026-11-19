@@ -47,7 +47,7 @@ class EmbeddingRepo():
     ):
         return (
             supabase
-            .table("Mentor Embeddings")
+            .table("MentorEmbeddings")
             .update(
                 {
                     "embedding": embedding,
@@ -66,7 +66,7 @@ class EmbeddingRepo():
     ):
         return (
             supabase
-            .table("Mentee Embeddings")
+            .table("MenteeEmbeddings")
             .update(
                 {
                     "embedding": embedding,
@@ -83,7 +83,7 @@ class EmbeddingRepo():
     ):
         return (
             supabase
-            .table("Mentor Embeddings")
+            .table("MentorEmbeddings")
             .select("*")
             .eq("mentor_id", mentor_id)
             .single()
@@ -96,7 +96,7 @@ class EmbeddingRepo():
     ):
         return (
             supabase
-            .table("Mentee Embeddings")
+            .table("MenteeEmbeddings")
             .select("*")
             .eq("mentee_id", mentee_id)
             .single()
@@ -107,7 +107,7 @@ class EmbeddingRepo():
     def deleteMentorEmbedding(discord_id: str):
         return (
             supabase
-            .table("Mentor Embeddings")
+            .table("MentorEmbeddings")
             .delete()
             .eq("mentor_id", discord_id)
             .execute()
@@ -117,7 +117,7 @@ class EmbeddingRepo():
     def deleteMenteeEmbedding(discord_id: str):
         return (
             supabase
-            .table("Mentee Embeddings")
+            .table("MenteeEmbeddings")
             .delete()
             .eq("mentee_id", discord_id)
             .execute()

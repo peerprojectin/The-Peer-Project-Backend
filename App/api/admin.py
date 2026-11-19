@@ -38,7 +38,7 @@ async def adminLoginRequest(
             key="access_token",
             value=result["access_token"],
             httponly=True,
-            secure=False,       # Change to True when using HTTPS
+            secure=True,        # Cookie is only sent over HTTPS
             samesite="lax",
             path="/"
         )
@@ -66,6 +66,9 @@ async def adminLogout(
 
     response.delete_cookie(
         key="access_token",
+        httponly=True,
+        secure=True,
+        samesite="lax",
         path="/"
     )
 

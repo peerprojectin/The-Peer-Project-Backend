@@ -1,0 +1,27 @@
+# Keep the build context small and keep secrets OUT of the image.
+
+# Secrets: injected at runtime via docker-compose env_file instead
+.env
+**/.env
+!**/.env.example
+
+# Python / tooling junk
+**/__pycache__
+**/*.py[cod]
+.venv
+venv
+
+# VCS, IDE, Claude
+.git
+.gitignore
+.idea
+.vscode
+.claude
+
+# Docker files themselves aren't needed inside the image
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Docs
+README.md
