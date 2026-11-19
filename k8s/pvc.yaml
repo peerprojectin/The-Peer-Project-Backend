@@ -1,0 +1,14 @@
+# Persistent disk for the HuggingFace model cache (Nemotron embed + Gemma 3 4B).
+# Without it every new pod re-downloads several GB before it can serve traffic.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: peerproject-hf-cache
+  labels:
+    app.kubernetes.io/name: peerproject-backend
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 30Gi
