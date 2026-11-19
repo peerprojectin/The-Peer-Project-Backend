@@ -45,8 +45,9 @@ AI/LLM Services
 - Gemma for assignment
 - Deepseek for profile analysis
 
-Deployment(planned)
-- Docker
+Deployment
+- Docker (multi-stage image, GPU-enabled via NVIDIA Container Toolkit)
+- Docker Compose
 
 ## Installation
 ```bash
@@ -70,8 +71,11 @@ The-Peer-Project-Backend/
     ├── config.py
     ├── main.py
     └── test.py
+├── .dockerignore
 ├── .gitignore
 ├── database.py
+├── docker-compose.yml
+├── Dockerfile
 └── requirements.txt
 ```
 
@@ -79,9 +83,29 @@ The-Peer-Project-Backend/
 Refer to .env.example under App/
 
 ## Running
+Local development:
 ```bash
 fastapi dev
 ```
+
+### Running with Docker
+Requirements on the host:
+- Docker + Docker Compose
+- An NVIDIA GPU with a recent driver (CUDA 13.0 builds of PyTorch)
+- NVIDIA Container Toolkit (Linux) or Docker Desktop with WSL2 GPU support (Windows)
+
+```bash
+cp App/.env.example App/.env   # then fill in the values, including HF_TOKEN
+docker compose up -d --build
+docker compose logs -f api
+```
+
+The first start downloads the embedding model and Gemma into the `hf-cache`
+volume, so it takes a while. Later restarts reuse the cache.
+
+The API listens on `127.0.0.1:8000`. The admin auth cookie is `Secure`, so in
+production put an HTTPS reverse proxy (Caddy, Nginx, or your host's load
+balancer) in front of it.
 
 ## API Documentation
 FastAPI uses Swagger UI in its docs for testing API endpoints
@@ -100,7 +124,7 @@ hence to access it go to https://localhost:8000/docs
 - [x] Mentor Assignment Engine
 - [ ] GraphQL API
 - [ ] Discord Bot Integration
-- [ ] Docker Deployment
+- [x] Docker Deployment
 - [ ] CI/CD Pipeline
 
 ## Author
