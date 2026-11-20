@@ -1,0 +1,17 @@
+project_id = "tpp"
+
+[functions.apply]
+entrypoint = "./functions/apply/index.js"
+verify_jwt = false
+
+[functions.questionnaire]
+entrypoint = "./functions/questionnaire/index.js"
+verify_jwt = false
+
+[functions.admin]
+entrypoint = "./functions/admin/index.js"
+verify_jwt = false
+
+[functions.purge-proofs]
+entrypoint = "./functions/purge-proofs/index.js"
+verify_jwt = false

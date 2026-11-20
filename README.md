@@ -1,171 +1,155 @@
-# TPP // ThePeerProject Backend
+# The Peer Project // Backend
 <img width="4500" height="1500" alt="image" src="https://github.com/user-attachments/assets/5f312f0d-c57a-4a75-ad7f-6d01ff490f30" />
 
-> free // student-run // non-profit in collaboration of r/CBSE, r/ICSE, and r/JEE
+> free / student-run / non-profit in collaboration of r/CBSE, r/ICSE, and r/JEE
 
 > https://peerproject.in
 
-## Overview
-PeerProject is a student-focused mentorship platform designed to connect current high schoolers with the high school grads who walked the same path as they did. 
+Application portal for The Peer Project. Includes the mentee form, mentor form, mentor questionnaire, admin panel and matching script.
 
-The Backend provides secure authentication, mentor/mentee management, AI-assisted mentor-mentee assignment and API endpoints for frontend and discord bot integration. 
+## Stack
+
+- Supabase for the db, storage, auth, Edge Functions (JavaScript on Deno), `pg_cron`, `pg_net`
+- Bot-checks - Cloudflare Turnstile
+- Email - Resend
+- Python for matching (`nvidia/llama-nemotron-embed-1b-v2`, `google/gemma-3-4b-it`, on an NVIDIA GPU)
 
 ## Architecture
-<img width="1556" height="928" alt="image" src="https://github.com/user-attachments/assets/0ea517a5-ade0-4563-8d5b-7bb2e8c11d47" />
-The Architecture choosen is the hub-spoke for easy upgradability. 
 
-## Features
-- JWT Authentication
-- PostgreSQL Database with Supabase
-- AI-powered Mentor-Mentee Assignment
-- GraphQL Integration(Will be available in V2)
-- Embeddings using pgvector in supabase.
-- Mentor/Mentee Registration
-- Secure API Calls
-- Rest API
+```mermaid
+flowchart LR
+  site["peerproject.in"]
+  cf["Cloudflare Turnstile"]
+  fn["Edge Functions<br/>(service role)"]
+  db[("Postgres")]
+  store[("Storage: proofs")]
+  resend["Resend"]
+  cron["pg_cron"]
 
-## Tech Stack
-Backend
-- FastAPI
-- Python
-- Pydantic for validation
+  site -- "token" --> cf
+  site --> fn
+  fn --> db
+  fn --> store
+  fn --> resend
+  cron --> fn
+```
 
-Database
-- PostgreSQL
-- Supabase
+## Schema
 
-Authentication
-- JWT
-- bcrypt
-- HttpOnly cookies for secure token storage (protected routes no longer expose tokens to client-side scripts)
+```mermaid
+erDiagram
+  cohorts ||--o{ mentees : ""
+  cohorts ||--o{ mentors : ""
+  cohorts ||--o{ questionnaire_questions : ""
+  mentors ||--|| questionnaire_invites : ""
+  mentors ||--o{ questionnaire_answers : ""
+  mentors ||--o{ mentor_reviews : ""
+  mentees ||--o{ assignments : ""
+  mentors ||--o{ assignments : ""
+  admins ||--o{ mentor_reviews : ""
+  admins ||--o{ proof_access_log : ""
+```
 
-AI/LLM Services
-- HuggingFace
-- NVIDIA Llama Nemotron Embed 1B V2
-- Gemma for assignment
-- Deepseek for profile analysis
+Also: `help_area_options`, `mentee_help_areas`, `mentor_help_areas`, `mentee_embeddings`, `mentor_embeddings`, `login_attempts`, `alert_log`.
 
-Deployment
-- Docker (multi-stage image, GPU-enabled via NVIDIA Container Toolkit)
-- Docker Compose
-- Kubernetes (Kustomize manifests in `k8s/`)
-- GitHub Actions CI/CD, images published to GHCR
+## Layout
 
-## Installation
+```
+supabase/
+  migrations/      schema, seed data, scheduled jobs, database functions
+  functions/
+    _shared/       routing, database client, email, Turnstile, tokens
+    apply/         form options, application submission
+    questionnaire/ mentor questionnaire by invite token
+    admin/         admin API, sign-in, lockout
+    purge-proofs/  deletes proofs older than 30 days
+  config.toml
+matching/          embeddings and mentor suggestions
+```
+
+## Security
+
+- RLS enabled on all tables, no policies. `anon` and `authenticated` have no grants. Only the service role (Edge Functions) reads or writes.
+- Proofs: private bucket, random filenames, content type set from magic bytes. Opened only by `admin` role via 60-second signed URLs; each open logged to `proof_access_log`. Deleted on accept, reject or withdraw; daily job deletes any older than 30 days.
+- Questionnaire tokens: 32 random bytes, sent in the URL fragment, stored as SHA-256 hashes.
+- Admin sign-in: proxied through `/admin/login`. 3 failures per email in 1 hour locks it for 1 hour and emails admins. Supabase Auth CAPTCHA enabled. An access token hook rejects locked accounts.
+- Retention: daily job deletes a cohort's applications 3 months after its `ends_at`.
+
+## Scheduled jobs
+
+| Job | Time (UTC) | Action |
+| --- | --- | --- |
+| `purge-expired-proofs` | 20:30 | calls `purge-proofs` |
+| `purge-expired-cohorts` | 20:45 | runs `purge_expired_cohorts()` |
+
+## API
+
+Errors: `{ "error": "<code>" }` with matching HTTP status.
+
+**apply** (Turnstile-required)
+- `GET /apply`: current cohort, open state per form, help-area options.
+- `POST /apply/mentee`, `POST /apply/mentor`: `multipart/form-data` with `application` (JSON), `cf-turnstile-response`, and `proof` for mentors (PDF, PNG, JPEG, max 5 MB). Mentor response includes `questionnaire_token`.
+
+**questionnaire**
+- `GET /questionnaire`, header `x-questionnaire-token`: questions.
+- `POST /questionnaire`, `{ token, answers: [{ question_id, answer }] }`: submit.
+- `POST /questionnaire/email`, `{ token }`: email link, max 3.
+- `POST /questionnaire/recover`, `{ email, cf-turnstile-response }`: reissue link. Same response whether or not an open questionnaire exists.
+
+**admin** (all except `/login` require `authorization: Bearer <access token>`)
+- `POST /admin/login`, `{ email, password, captcha }`
+- `GET /me`, `GET /cohorts`, `PATCH /cohorts/:id`
+- `GET /mentees`, `GET /mentors` (query: `cohort_id`, `status`), `GET /mentees/:id`, `GET /mentors/:id`
+- `POST /:kind/:id/verified`, `{ is_verified }`
+- `POST /:kind/:id/status`, `{ status }`: sends decision email on accept, reject, waitlist; deletes mentor proof on accept, reject, withdraw.
+- `GET /mentors/:id/proof`, `PUT /mentors/:id/review`
+- `GET /assignments`, `POST /assignments`, `PATCH /assignments/:id`
+
+Roles: `reviewer` can read and review; `admin` required for proofs, decisions, verification, assignments and cohort dates.
+
+## Setup
+
+Edge Function secrets (Dashboard → Edge Functions → Secrets):
+
+| Name                | Value                                          |
+| ------------------- | ---------------------------------------------- |
+| `ALLOWED_ORIGINS`   | `https://peerproject.in`                       |
+| `TURNSTILE_SECRET`  | Turnstile secret key                           |
+| `RESEND_API_KEY`    | Resend API key                                 |
+| `MAIL_FROM`         | `The Peer Project <summons@peerproject.in>`    |
+| `QUESTIONNAIRE_URL` | `https://peerproject.in/questionnaire`         |
+| `PURGE_SECRET`      | random string, also in Vault as `purge_secret` |
+| `DISCORD_INVITE`    | server invite for the mentee acceptance email  |
+
+Vault secrets (Database → Vault): `purge_secret` (same value as `PURGE_SECRET`) and `project_url` (`https://<project-ref>.supabase.co`), both read by the proof purge schedule.
+
+Deploy:
+
 ```bash
-git clone github.com/ShyZen15/The-Peer-Project-Backend
-cd The-Peer-Project-Backend
+supabase link --project-ref <project-ref>
+supabase db push
+supabase functions deploy
+```
+
+Add `--use-api` to `functions deploy` if Docker isn't running.
+
+Admins: create the user under Authentication → Users, then insert a row into `admins` (`user_id`, `display_name`, `email`, `role`). Disable public sign-ups. Enable CAPTCHA under Attack Protection. Set `custom_access_token_hook` as the access token hook.
+
+## Matching
+
+```bash
+cd matching
 python -m venv .venv
-pip install -r requirements.txt
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env
+.venv/bin/python match.py --cohort <cohort-id> --dry-run
 ```
 
-## File Structure
-```
-The-Peer-Project-Backend/
-|
-├── App/
-    ├── AI/
-    ├── api/
-    ├── auth/
-    ├── repository/
-    ├── schemas/
-    ├── services/
-    ├── config.py
-    ├── main.py
-    └── test.py
-├── .github/workflows/   (ci.yml, cd.yml)
-├── k8s/                 (Kubernetes manifests)
-├── .dockerignore
-├── .gitignore
-├── database.py
-├── docker-compose.yml
-├── Dockerfile
-└── requirements.txt
-```
+`matching/.env` needs `SUPABASE_URL` and `SUPABASE_KEY` (secret key). Embeds accepted, verified applicants, retrieves nearest mentors with free capacity for the mentee's class, picks one with Gemma, writes a `pending` assignment. `--dry-run` prints without writing.
 
-## Environment Variables
-Refer to .env.example under App/
-
-## Running
-Local development:
-```bash
-fastapi dev
-```
-
-### Running with Docker
-Requirements on the host:
-- Docker + Docker Compose
-- An NVIDIA GPU with a recent driver (CUDA 13.0 builds of PyTorch)
-- NVIDIA Container Toolkit (Linux) or Docker Desktop with WSL2 GPU support (Windows)
-
-```bash
-cp App/.env.example App/.env   # then fill in the values, including HF_TOKEN
-docker compose up -d --build
-docker compose logs -f api
-```
-
-The first start downloads the embedding model and Gemma into the `hf-cache`
-volume, so it takes a while. Later restarts reuse the cache.
-
-The API listens on `127.0.0.1:8000`. The admin auth cookie is `Secure`, so in
-production put an HTTPS reverse proxy (Caddy, Nginx, or your host's load
-balancer) in front of it.
-
-## CI/CD
-GitHub Actions, in `.github/workflows/`:
-
-| Workflow | Runs on | What it does |
-|---|---|---|
-| `ci.yml` | every PR and push | ruff lint, byte-compile, validate k8s + compose files, test-build the Docker image |
-| `cd.yml` | push to `v3` (or manual run) | runs CI, then builds and pushes the image to `ghcr.io/shyzen15/the-peer-project-backend` (tags `sha-<commit>`, `v3`, `latest`), then deploys it to Kubernetes pinned by digest, rolling back if the new pod doesn't become healthy |
-
-To turn on the deploy step:
-1. Repo **Settings → Environments**: create `production` and add secret `KUBE_CONFIG` (a kubeconfig that can deploy to the `peerproject` namespace). Optionally add required reviewers for a manual approval gate.
-2. Repo **Settings → Variables**: set `K8S_DEPLOY_ENABLED` to `true`.
-
-Until then CD still builds and publishes the image and skips the deploy.
-
-## Kubernetes
-Cluster requirements:
-- A GPU node with the NVIDIA device plugin (or NVIDIA GPU Operator)
-- An ingress controller (set `ingressClassName` in `k8s/ingress.yaml`)
-- cert-manager with a `letsencrypt-prod` ClusterIssuer (HTTPS is required for the secure admin cookie)
-
-First deploy:
-```bash
-kubectl create namespace peerproject
-kubectl -n peerproject create secret generic peerproject-backend-env --from-env-file=App/.env
-kubectl apply -k k8s/
-kubectl -n peerproject rollout status deployment/peerproject-backend --timeout=20m
-```
-
-Edit the host in `k8s/ingress.yaml` to your real API domain before applying.
-If the image pull fails with an auth error, make the GHCR package public or add an `imagePullSecret`.
-
-## API Documentation
-FastAPI uses Swagger UI in its docs for testing API endpoints
-hence to access it go to https://localhost:8000/docs
-
-## Database Design
-<img width="982" height="988" alt="image" src="https://github.com/user-attachments/assets/eedea6ef-ddc2-42f8-b269-529245d0f890" />
-
-## Roadmap
-
-- [x] Mentor APIs
-- [x] Mentee APIs
-- [x] Admin Authentication
-- [x] AI Embeddings
-- [x] Semantic Search
-- [x] Mentor Assignment Engine
-- [ ] GraphQL API
-- [ ] Discord Bot Integration
-- [x] Docker Deployment
-- [x] CI/CD Pipeline
-- [x] Kubernetes Deployment
-
-## Author
-Developed by Shiven Sharma(ShyZen15) Co-Founder @ ThePeerProject
+## Authors
+\- Shiven Sharma (ShyZen15), Co-Founder @ The Peer Project
+\- niel / https://github.com/nielandvoid, Founder @ The Peer Project
 
 ## Copyright
-© 2026 peerproject.in. all rights reserved. 
-
+© 2026 peerproject.in. all rights reserved.
