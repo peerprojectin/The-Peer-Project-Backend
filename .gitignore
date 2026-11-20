@@ -1,10 +1,9 @@
 .venv
+__pycache__/
+.env
+*.env
+!.env.example
 .idea
-__pycache__
-App/.env
-App/__pycache__
-App/Schemas/__pycache__
-App/repository/__pycache__
-App/api/__pycache__
 .vscode
-App/services/__pycache__
+supabase/.temp
+supabase/.branches
