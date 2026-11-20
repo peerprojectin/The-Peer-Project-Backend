@@ -1,0 +1,98 @@
+# CI: "is this change safe to merge?"
+# Runs on every pull request and every push (except v3, where cd.yml calls
+# this same workflow as its first stage, so it isn't run twice).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - v3
+  workflow_call:
+    inputs:
+      build_image:
+        description: "Run the Docker build check ('false' when the caller builds the image itself)"
+        type: string
+        default: "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/shyzen15/the-peer-project-backend
+
+jobs:
+  lint:
+    name: Lint Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff==0.8.6
+
+      # Blocking: syntax errors, undefined names, broken comparisons.
+      # These are real bugs that would crash the app at import or call time.
+      - name: Ruff (blocking checks)
+        run: ruff check --select E9,F63,F7,F82 --output-format github .
+
+      # Non-blocking: style findings (unused imports etc.) are reported only.
+      - name: Ruff (full report, non-blocking)
+        run: ruff check --exit-zero --output-format github .
+
+      - name: Byte-compile every module
+        run: python -m compileall -q App database.py
+
+  manifests:
+    name: Validate Kubernetes & Compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-kubectl@v4
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C "$RUNNER_TEMP" kubeconform
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Render and validate k8s manifests
+        run: kubectl kustomize k8s | kubeconform -strict -summary
+
+      - name: Validate docker-compose.yml
+        run: |
+          cp App/.env.example App/.env
+          docker compose config --quiet
+
+  docker-build:
+    name: Docker build
+    if: inputs.build_image != 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The CUDA PyTorch layer is several GB; the stock runner needs room.
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af
+          df -h /
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build only (no push), reusing layers the CD pipeline cached in GHCR.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache

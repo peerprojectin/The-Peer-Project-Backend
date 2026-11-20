@@ -1,0 +1,137 @@
+# CD: "ship what's on v3."
+#   ci  ->  publish (build + push image to GHCR)  ->  deploy (Kubernetes)
+#
+# One-time setup (repo Settings):
+#   - Variables:  K8S_DEPLOY_ENABLED = true   (until set, deploy is skipped)
+#   - Environments: "production", with secret KUBE_CONFIG = contents of a
+#     kubeconfig for a service account that can deploy to `peerproject`.
+#     Add "required reviewers" there if you want a manual approval gate.
+name: CD
+
+on:
+  push:
+    branches:
+      - v3
+  workflow_dispatch:
+
+# Never run two deploys at once; a newer push waits for the current one.
+concurrency:
+  group: cd-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: ghcr.io/shyzen15/the-peer-project-backend
+  NAMESPACE: peerproject
+  DEPLOYMENT: peerproject-backend
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    with:
+      build_image: "false"   # publish builds the image; don't build it twice
+
+  publish:
+    name: Build & push image
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write        # push to ghcr.io with GITHUB_TOKEN
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af
+          df -h /
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tags: sha-<short sha> (immutable, traceable to a commit), v3, latest
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=v3
+            type=raw,value=latest
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+  deploy:
+    name: Deploy to Kubernetes
+    needs: publish
+    if: vars.K8S_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-kubectl@v4
+
+      - name: Configure cluster access
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          if [ -z "$KUBE_CONFIG" ]; then
+            echo "::error::KUBE_CONFIG secret is not set on the production environment"
+            exit 1
+          fi
+          printf '%s' "$KUBE_CONFIG" > "$RUNNER_TEMP/kubeconfig"
+          chmod 600 "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+
+      # Pin the Deployment to the exact image digest built above, so the
+      # cluster runs precisely this commit's image (tags can move; digests can't).
+      - name: Render manifests pinned to the new image
+        env:
+          DIGEST: ${{ needs.publish.outputs.digest }}
+        run: |
+          mkdir -p deploy-overlay
+          cat > deploy-overlay/kustomization.yaml <<EOF
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          resources:
+            - ../k8s
+          images:
+            - name: ${IMAGE_NAME}
+              digest: ${DIGEST}
+          EOF
+          kubectl kustomize deploy-overlay | grep -n "image:"
+
+      - name: Apply
+        id: apply
+        run: kubectl apply -k deploy-overlay
+
+      - name: Wait for rollout
+        run: kubectl -n "$NAMESPACE" rollout status deployment/"$DEPLOYMENT" --timeout=20m
+
+      # If the new pod never becomes healthy, put the previous version back.
+      - name: Roll back on failure
+        if: failure() && steps.apply.outcome == 'success'
+        run: |
+          kubectl -n "$NAMESPACE" rollout undo deployment/"$DEPLOYMENT"
+          kubectl -n "$NAMESPACE" rollout status deployment/"$DEPLOYMENT" --timeout=20m

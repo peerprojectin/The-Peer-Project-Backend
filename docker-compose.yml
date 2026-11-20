@@ -1,0 +1,39 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: peerproject-backend:v3
+    container_name: peerproject-backend
+    restart: unless-stopped
+
+    # Secrets live in App/.env on the host and are injected at runtime;
+    # they are never copied into the image (see .dockerignore).
+    env_file:
+      - App/.env
+
+    # Bound to localhost only. The admin cookie is `secure=True`, so the
+    # public entry point must be an HTTPS reverse proxy (Caddy / Nginx /
+    # your platform's load balancer) that forwards to 127.0.0.1:8000.
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    # Persist downloaded HuggingFace models across container restarts and
+    # rebuilds, so the multi-GB downloads only happen once.
+    volumes:
+      - hf-cache:/home/app/.cache/huggingface
+
+    # The embedding encoder runs on "cuda" and Gemma uses device_map="auto",
+    # so the container needs the host's NVIDIA GPU.
+    # Host needs: NVIDIA driver + NVIDIA Container Toolkit
+    # (or Docker Desktop with WSL2 GPU support on Windows).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  hf-cache:

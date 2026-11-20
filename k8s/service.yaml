@@ -1,0 +1,15 @@
+# Stable in-cluster address for the pod(s): peerproject-backend.peerproject.svc
+apiVersion: v1
+kind: Service
+metadata:
+  name: peerproject-backend
+  labels:
+    app.kubernetes.io/name: peerproject-backend
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: peerproject-backend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
