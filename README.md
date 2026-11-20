@@ -148,7 +148,7 @@ cp .env.example .env
 `matching/.env` needs `SUPABASE_URL` and `SUPABASE_KEY` (secret key). Embeds accepted, verified applicants, retrieves nearest mentors with free capacity for the mentee's class, picks one with Gemma, writes a `pending` assignment. `--dry-run` prints without writing.
 
 ## Authors
-\- Shiven Sharma (ShyZen15), Co-Founder @ The Peer Project
+\- Shiven Sharma (ShyZen15), Co-Founder @ The Peer Project      
 \- niel / https://github.com/nielandvoid, Founder @ The Peer Project
 
 ## Copyright
